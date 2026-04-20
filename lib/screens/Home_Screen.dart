@@ -235,7 +235,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Matel VideoCam',
+          'Spy VideoCam',
           style: TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w500,
@@ -244,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          'v1.0.0 · ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+          'v1.1.0 · ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
           style: const TextStyle(
             fontSize: 12,
             color: Color(0xFF888888),

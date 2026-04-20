@@ -30,6 +30,11 @@ All notable changes to this project will be documented in this file.
   — Android <10: `Permission.storage`
 - **MethodChannel Stability:** Aligned package name `com.remtekindo.cctv` across MainActivity and Services.
 
+### Changed
+- App name renamed from "Matel VideoCam" to "Spy VideoCam"
+- Video output directory changed from /DCIM/MatelCCTV/ to /DCIM/SpyVideoCam/
+- Version display corrected from v1.0.0 to v1.1.0 in HomeScreen
+
 ---
 
 ## [Unreleased]
