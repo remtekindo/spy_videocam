@@ -6,6 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v1.2.0] — 2026-04-21
+
+### Added
+- CameraRecorderPlugin.kt: Camera2 + MediaRecorder native layer,
+  chunk rotation 10 menit, push status via EventChannel
+
+### Changed
+- VideoForegroundService: integrasikan CameraRecorderPlugin,
+  rekaman kini berjalan sepenuhnya di native
+- MainActivity: tambah EventChannel com.remtekindo.cctv/recorder_events
+- recording_service.dart: CameraController dihapus, diganti
+  MethodChannel + EventChannel ke native
+
+### Fixed
+- Rekaman berhenti saat tombol home ditekan atau layar dikunci —
+  sekarang berjalan penuh di background tanpa membutuhkan Flutter surface
+
+---
+
 ## [v1.1.0] — 2026-04-20
 
 ### Added
@@ -47,4 +66,4 @@ All notable changes to this project will be documented in this file.
 
 *For architecture evolution — see `PROJECT_EVOLUTION.md`*
 
-*Last updated: April 20, 2026*
+*Last updated: April 21, 2026*

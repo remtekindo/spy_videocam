@@ -26,6 +26,7 @@ chunk rotation to prevent file size limits.
 - Foreground service — persistent notification with stop action
 - Boot restore — scheduled alarm restored after device reboot
 - API-aware permissions — handles Android 10 through 14+
+- Background recording — rekaman tetap berjalan saat layar mati atau app diminimize
 
 ---
 
@@ -54,7 +55,7 @@ File naming format:
 
 - Flutter 3.x (Dart)
 - Kotlin (native Android plugins)
-- camera_android_camerax
+- Camera2 API + MediaRecorder (native Kotlin, background recording)
 - permission_handler
 - device_info_plus
 - wakelock_plus
@@ -107,6 +108,7 @@ lib/
 android/app/src/main/kotlin/com/remtekindo/cctv/
   MainActivity.kt             — MethodChannel handler
   VideoForegroundService.kt   — foreground service + WakeLock
+  CameraRecorderPlugin.kt     — Camera2 + MediaRecorder, chunk rotation
   SchedulerService.kt         — AlarmManager + BootReceiver
 
 ---
@@ -139,4 +141,4 @@ See the LICENSE file for details.
 
 ---
 
-*Last updated: April 20, 2026*
+*Last updated: April 21, 2026*

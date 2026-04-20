@@ -11,10 +11,15 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import io.flutter.plugin.common.EventChannel
 
 class VideoForegroundService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+
+    // CameraRecorderPlugin diinisialisasi saat service onCreate
+    // dan di-dispose saat onDestroy
+    private var recorder: CameraRecorderPlugin? = null
 
     companion object {
         const val CHANNEL_ID = "cctv_channel"
@@ -22,6 +27,9 @@ class VideoForegroundService : Service() {
         const val ACTION_START = "ACTION_START_RECORDING"
         const val ACTION_STOP = "ACTION_STOP_RECORDING"
         const val EXTRA_IS_SCHEDULED = "is_scheduled"
+
+        // EventChannel sink — diset dari MainActivity saat Flutter engine ready
+        var eventSink: EventChannel.EventSink? = null
 
         fun startService(context: Context, isScheduled: Boolean) {
             val intent = Intent(context, VideoForegroundService::class.java).apply {
@@ -47,16 +55,26 @@ class VideoForegroundService : Service() {
         super.onCreate()
         createNotificationChannel()
         acquireWakeLock()
+        recorder = CameraRecorderPlugin(applicationContext)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
                 val isScheduled = intent.getBooleanExtra(EXTRA_IS_SCHEDULED, false)
+
+                // Pasang EventSink ke recorder agar status bisa dikirim ke Flutter
+                recorder?.eventSink = eventSink
+
                 val notification = buildNotification(isScheduled)
                 startForeground(NOTIFICATION_ID, notification)
+
+                // Mulai rekaman via Camera2 native — berjalan di background
+                // tanpa membutuhkan Flutter surface / layar aktif
+                recorder?.startRecording(isScheduled)
             }
             ACTION_STOP -> {
+                recorder?.stopRecording()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -68,6 +86,8 @@ class VideoForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        recorder?.dispose()
+        recorder = null
         releaseWakeLock()
     }
 
@@ -126,13 +146,11 @@ class VideoForegroundService : Service() {
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "SpyVideoCam::RecordingWakeLock"
-        ).apply { acquire(6 * 60 * 60 * 1000L) } // maks 6 jam
+        ).apply { acquire(6 * 60 * 60 * 1000L) }
     }
 
     private fun releaseWakeLock() {
-        wakeLock?.let {
-            if (it.isHeld) it.release()
-        }
+        wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }
 }

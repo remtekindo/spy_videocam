@@ -16,6 +16,54 @@ dependency, no account required.
 
 ---
 
+## v1.2.0 — Native Camera2 Recording (April 2026)
+
+### Background
+
+Pengujian device menunjukkan bahwa rekaman berhenti ketika tombol home
+ditekan atau layar dikunci. Root cause: Flutter camera plugin membutuhkan
+active surface — ia tidak dapat merekam tanpa layar aktif. Karena
+peruntukan Spy VideoCam adalah CCTV dengan device tanpa layar, ini adalah
+blocker yang harus diselesaikan sebelum bisa digunakan secara nyata.
+
+### Solusi — Camera2 Native Layer
+
+Recording dipindahkan sepenuhnya ke native Kotlin menggunakan Camera2 API
+dan MediaRecorder. Flutter tidak lagi memegang CameraController —
+ia hanya mengirim perintah start/stop dan menerima status.
+
+CameraRecorderPlugin adalah class baru yang mengelola seluruh lifecycle
+rekaman di native: membuka kamera via Camera2, mengkonfigurasi
+MediaRecorder, menjalankan chunk rotation via Handler, dan mendorong
+status ke Flutter via EventChannel. Plugin ini hidup di dalam
+VideoForegroundService sehingga tetap aktif selama service berjalan —
+tidak peduli apakah layar mati, app di background, atau Flutter engine
+tidak aktif.
+
+### Arsitektur komunikasi
+
+Flutter → Native: MethodChannel "com.remtekindo.cctv/scheduler"
+  startRecordingNow, stopRecording
+
+Native → Flutter: EventChannel "com.remtekindo.cctv/recorder_events"
+  push map: {type, isRecording, chunkIndex, savedFiles, elapsedMs}
+
+### Parameter video
+
+480p (640×480), H264, 1.5 Mbps, 24fps, AAC 128kbps 44100Hz.
+Resolusi dipilih untuk keseimbangan antara keterbacaan gambar CCTV
+dan konsumsi baterai/storage pada device lama.
+
+### Known trade-off
+
+Preview kamera tidak lagi tersedia di Flutter UI — CameraController
+dihapus sepenuhnya. Ini disengaja: preview membutuhkan surface yang
+sama dengan yang dipakai MediaRecorder, dan menampilkan preview
+akan mempersulit background recording. Untuk use case CCTV headless,
+preview tidak dibutuhkan.
+
+---
+
 ## v1.1.0 — Initial Release (April 2026)
 
 ### Background
