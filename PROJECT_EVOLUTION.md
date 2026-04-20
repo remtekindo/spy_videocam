@@ -109,6 +109,15 @@ device testing:
   recording. Storage permissions are requested for their appropriate
   API level but their result does not block the recording flow.
 
+### Rename — Matel VideoCam to Spy VideoCam
+
+Before opening the repository to the public, the app was renamed from
+"Matel VideoCam" to "Spy VideoCam" to establish a clear standalone
+identity separate from the Matel hardware ecosystem. The video output
+directory was updated accordingly from /DCIM/MatelCCTV/ to
+/DCIM/SpyVideoCam/, and the version display in HomeScreen was corrected
+from v1.0.0 to v1.1.0.
+
 ---
 
 ## Architectural Decisions

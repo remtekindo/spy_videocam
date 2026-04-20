@@ -219,7 +219,7 @@ class RecordingService {
   Future<Directory> _getOutputDirectory() async {
     Directory? dir;
     if (Platform.isAndroid) {
-      dir = Directory('/storage/emulated/0/DCIM/MatelCCTV');
+      dir = Directory('/storage/emulated/0/DCIM/SpyVideoCam');
     } else {
       dir = await getApplicationDocumentsDirectory();
     }

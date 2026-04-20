@@ -75,7 +75,7 @@ class VideoForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Matel VideoCam",
+                "Spy VideoCam",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Notifikasi rekaman aktif"
@@ -104,7 +104,7 @@ class VideoForegroundService : Service() {
         )
 
         val title = if (isScheduled) "Rekaman terjadwal aktif" else "Merekam"
-        val text = "Matel VideoCam · chunk 10 menit · ketuk untuk buka"
+        val text = "Spy VideoCam · chunk 10 menit · ketuk untuk buka"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)

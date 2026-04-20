@@ -43,7 +43,7 @@ Minimum Android version: 7.0 (API 24)
 ## Output
 
 Videos are saved to:
-  /storage/emulated/0/DCIM/MatelCCTV/
+  /storage/emulated/0/DCIM/SpyVideoCam/
 
 File naming format:
   chunk_001_20250420_143022.mp4
