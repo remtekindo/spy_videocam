@@ -31,25 +31,26 @@ class RecordingSession {
 /// oleh CameraRecorderPlugin (Kotlin) via VideoForegroundService.
 ///
 /// Flutter hanya:
-/// 1. Kirim perintah start/stop via MethodChannel (scheduler channel)
-/// 2. Terima status (elapsed, chunk, savedFiles) via EventChannel
-/// 3. Expose stream ke UI (RecordingPopup, HomeScreen)
+/// 1. Subscribe EventChannel DULU sebelum kirim startRecordingNow
+/// 2. Kirim perintah start/stop via MethodChannel (scheduler channel)
+/// 3. Terima status (elapsed, chunk, savedFiles) via EventChannel
+/// 4. Expose stream ke UI (RecordingPopup, HomeScreen)
 class RecordingService {
   static final RecordingService _instance = RecordingService._internal();
   factory RecordingService() => _instance;
   RecordingService._internal();
 
-  static const _schedulerChannel = MethodChannel('com.remtekindo.cctv/scheduler');
-  static const _recorderEvents = EventChannel('com.remtekindo.cctv/recorder_events');
+  static const _schedulerChannel =
+      MethodChannel('com.remtekindo.cctv/scheduler');
+  static const _recorderEvents =
+      EventChannel('com.remtekindo.cctv/recorder_events');
 
   StreamSubscription? _eventSub;
-  Timer? _elapsedTimer;
 
   RecordingState _state = RecordingState.idle;
   RecordingSession? _session;
 
   static const Duration maxAllowedDuration = Duration(hours: 6);
-  // Diekspos ke RecordingPopup untuk progress bar
   static const Duration chunkDuration = Duration(minutes: 10);
 
   final StreamController<RecordingSession?> _sessionStream =
@@ -112,11 +113,19 @@ class RecordingService {
     _setState(RecordingState.recording);
     _sessionStream.add(_session);
 
-    // Mulai VideoForegroundService — rekaman dilakukan sepenuhnya di native
-    await _schedulerChannel.invokeMethod('startRecordingNow');
-
-    // Dengarkan status dari CameraRecorderPlugin via EventChannel
+    // PENTING: subscribe EventChannel DULU sebelum kirim startRecordingNow
+    // agar eventSink di MainActivity sudah terpasang sebelum native push status.
+    // Tanpa ini, push pertama dari CameraRecorderPlugin akan gagal karena
+    // eventSink masih null (FlutterJNI detached warning di log).
     _listenToNativeEvents();
+
+    // Beri waktu 300ms agar onListen di MainActivity sempat terpanggil
+    // dan eventSink sudah terpasang di VideoForegroundService sebelum
+    // native mulai push status.
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // Baru kirim perintah ke native untuk mulai rekam
+    await _schedulerChannel.invokeMethod('startRecordingNow');
   }
 
   void _listenToNativeEvents() {
@@ -163,7 +172,6 @@ class RecordingService {
   void _finalizeStop() {
     _eventSub?.cancel();
     _eventSub = null;
-    _elapsedTimer?.cancel();
 
     WakelockPlus.disable();
 
@@ -179,7 +187,6 @@ class RecordingService {
 
   void dispose() {
     _eventSub?.cancel();
-    _elapsedTimer?.cancel();
     _sessionStream.close();
     _stateStream.close();
   }
