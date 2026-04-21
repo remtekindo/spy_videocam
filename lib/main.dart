@@ -34,6 +34,12 @@ Future<void> requestPermissions() async {
     // Android 10 ke bawah
     await Permission.storage.request();
   }
+
+  // Exact alarm — diperlukan untuk rekam terjadwal di Android 12+
+  // Blok ini terpisah dari storage permission di atas
+  if (sdkInt >= 31) {
+    await Permission.scheduleExactAlarm.request();
+  }
 }
 
 void main() async {
