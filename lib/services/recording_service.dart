@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:camera/camera.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -26,21 +25,33 @@ class RecordingSession {
   });
 }
 
+/// RecordingService — Dart side
+///
+/// Tidak lagi memegang CameraController. Semua rekaman dilakukan
+/// oleh CameraRecorderPlugin (Kotlin) via VideoForegroundService.
+///
+/// Flutter hanya:
+/// 1. Subscribe EventChannel DULU sebelum kirim startRecordingNow
+/// 2. Kirim perintah start/stop via MethodChannel (scheduler channel)
+/// 3. Terima status (elapsed, chunk, savedFiles) via EventChannel
+/// 4. Expose stream ke UI (RecordingPopup, HomeScreen)
 class RecordingService {
   static final RecordingService _instance = RecordingService._internal();
   factory RecordingService() => _instance;
   RecordingService._internal();
 
-  CameraController? _cameraController;
-  Timer? _chunkTimer;
-  Timer? _elapsedTimer;
-  Timer? _maxDurationTimer;
+  static const _schedulerChannel =
+      MethodChannel('com.remtekindo.cctv/scheduler');
+  static const _recorderEvents =
+      EventChannel('com.remtekindo.cctv/recorder_events');
+
+  StreamSubscription? _eventSub;
 
   RecordingState _state = RecordingState.idle;
   RecordingSession? _session;
 
-  static const Duration chunkDuration = Duration(minutes: 10);
   static const Duration maxAllowedDuration = Duration(hours: 6);
+  static const Duration chunkDuration = Duration(minutes: 10);
 
   final StreamController<RecordingSession?> _sessionStream =
       StreamController<RecordingSession?>.broadcast();
@@ -56,7 +67,6 @@ class RecordingService {
   /// Storage/media permission diurus terpisah dan tidak memblokir rekaman.
   Future<bool> requestPermissions() async {
     if (!Platform.isAndroid) {
-      // Non-Android: cukup minta camera & microphone
       final camera = await Permission.camera.request();
       final audio = await Permission.microphone.request();
       return camera.isGranted && audio.isGranted;
@@ -65,7 +75,6 @@ class RecordingService {
     final androidInfo = await DeviceInfoPlugin().androidInfo;
     final sdkInt = androidInfo.version.sdkInt;
 
-    // Minta camera & microphone — wajib untuk rekam
     final results = await [
       Permission.camera,
       Permission.microphone,
@@ -74,43 +83,17 @@ class RecordingService {
     final cameraGranted = results[Permission.camera]?.isGranted ?? false;
     final audioGranted = results[Permission.microphone]?.isGranted ?? false;
 
-    // Storage permission — sesuai API level, tapi tidak memblokir rekaman
-    // jika ditolak (file tetap bisa disimpan ke DCIM via path langsung)
     if (sdkInt >= 33) {
-      // Android 13+: gunakan izin granular media
       await Permission.videos.request();
     } else if (sdkInt >= 30) {
-      // Android 11–12: manageExternalStorage untuk akses DCIM penuh
       if (!(await Permission.manageExternalStorage.isGranted)) {
         await Permission.manageExternalStorage.request();
       }
     } else {
-      // Android 10 ke bawah: READ/WRITE_EXTERNAL_STORAGE
       await Permission.storage.request();
     }
 
-    // Hanya camera & audio yang menjadi penentu boleh rekam atau tidak
     return cameraGranted && audioGranted;
-  }
-
-  Future<void> initCamera() async {
-    if (_cameraController != null) return;
-    final cameras = await availableCameras();
-    if (cameras.isEmpty) throw Exception('Tidak ada kamera tersedia');
-
-    final back = cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.back,
-      orElse: () => cameras.first,
-    );
-
-    _cameraController = CameraController(
-      back,
-      ResolutionPreset.low, // 360p untuk hemat baterai
-      enableAudio: true,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
-
-    await _cameraController!.initialize();
   }
 
   Future<void> startRecording({required bool isScheduled}) async {
@@ -119,7 +102,6 @@ class RecordingService {
     final granted = await requestPermissions();
     if (!granted) throw Exception('Izin kamera/audio ditolak');
 
-    await initCamera();
     await WakelockPlus.enable();
 
     _session = RecordingSession(
@@ -131,116 +113,72 @@ class RecordingService {
     _setState(RecordingState.recording);
     _sessionStream.add(_session);
 
-    await _startChunk();
-    _startElapsedTimer();
-    _startMaxDurationTimer();
+    // PENTING: subscribe EventChannel DULU sebelum kirim startRecordingNow
+    // agar eventSink di MainActivity sudah terpasang sebelum native push status.
+    // Tanpa ini, push pertama dari CameraRecorderPlugin akan gagal karena
+    // eventSink masih null (FlutterJNI detached warning di log).
+    _listenToNativeEvents();
+
+    // Beri waktu 300ms agar onListen di MainActivity sempat terpanggil
+    // dan eventSink sudah terpasang di VideoForegroundService sebelum
+    // native mulai push status.
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // Baru kirim perintah ke native untuk mulai rekam
+    await _schedulerChannel.invokeMethod('startRecordingNow');
   }
 
-  Future<void> _startChunk() async {
-    if (_cameraController == null || _state != RecordingState.recording) return;
+  void _listenToNativeEvents() {
+    _eventSub?.cancel();
+    _eventSub = _recorderEvents.receiveBroadcastStream().listen(
+      (event) {
+        if (event is Map && _session != null) {
+          final type = event['type'] as String?;
+          final elapsedMs = event['elapsedMs'] as int? ?? 0;
+          final chunkIndex = event['chunkIndex'] as int? ?? 1;
+          final savedFiles = event['savedFiles'] as int? ?? 0;
 
-    final dir = await _getOutputDirectory();
-    final timestamp = _formatTimestamp(DateTime.now());
-    final chunkIdx = _session!.chunkIndex.toString().padLeft(3, '0');
-    final path = '${dir.path}/chunk_${chunkIdx}_$timestamp.mp4';
+          _session!.elapsed = Duration(milliseconds: elapsedMs);
+          _session!.chunkIndex = chunkIndex;
+          _session!.savedFiles = savedFiles;
+          _sessionStream.add(_session);
 
-    await _cameraController!.startVideoRecording();
-
-    _chunkTimer?.cancel();
-    _chunkTimer = Timer(chunkDuration, () async {
-      await _rotateChunk(path);
-    });
-  }
-
-  Future<void> _rotateChunk(String currentPath) async {
-    if (_state != RecordingState.recording) return;
-
-    try {
-      final file = await _cameraController!.stopVideoRecording();
-      await _saveToGallery(file.path, currentPath);
-
-      _session!.savedFiles++;
-      _session!.chunkIndex++;
-      _sessionStream.add(_session);
-
-      await _startChunk();
-    } catch (e) {
-      // ignore chunk rotation error, lanjut chunk baru
-    }
-  }
-
-  void _startElapsedTimer() {
-    _elapsedTimer?.cancel();
-    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_session != null && _state == RecordingState.recording) {
-        _session!.elapsed = DateTime.now().difference(_session!.startTime);
-        _sessionStream.add(_session);
-      }
-    });
-  }
-
-  void _startMaxDurationTimer() {
-    _maxDurationTimer?.cancel();
-    _maxDurationTimer = Timer(maxAllowedDuration, () async {
-      await stopRecording();
-    });
+          if (type == 'stopped') {
+            _finalizeStop();
+          }
+        }
+      },
+      onError: (error) {
+        // Native error — hentikan sesi di Dart side
+        _finalizeStop();
+      },
+    );
   }
 
   Future<void> stopRecording() async {
     if (_state != RecordingState.recording) return;
     _setState(RecordingState.stopping);
 
-    _chunkTimer?.cancel();
-    _elapsedTimer?.cancel();
-    _maxDurationTimer?.cancel();
-
+    // Kirim perintah stop ke native — native akan push event 'stopped'
+    // yang akan trigger _finalizeStop() via _listenToNativeEvents
     try {
-      if (_cameraController != null &&
-          _cameraController!.value.isRecordingVideo) {
-        final file = await _cameraController!.stopVideoRecording();
-        final dir = await _getOutputDirectory();
-        final timestamp = _formatTimestamp(DateTime.now());
-        final chunkIdx = _session!.chunkIndex.toString().padLeft(3, '0');
-        final path = '${dir.path}/chunk_${chunkIdx}_$timestamp.mp4';
-        await _saveToGallery(file.path, path);
-        _session!.savedFiles++;
-      }
-    } catch (_) {}
+      await _schedulerChannel.invokeMethod('stopRecording');
+    } catch (_) {
+      // Jika channel gagal, finalize langsung
+      _finalizeStop();
+    }
+  }
 
-    await _cameraController?.dispose();
-    _cameraController = null;
-    await WakelockPlus.disable();
+  void _finalizeStop() {
+    _eventSub?.cancel();
+    _eventSub = null;
+
+    WakelockPlus.disable();
 
     _session = null;
     _sessionStream.add(null);
     _setState(RecordingState.idle);
   }
-
-  Future<Directory> _getOutputDirectory() async {
-    Directory? dir;
-    if (Platform.isAndroid) {
-      dir = Directory('/storage/emulated/0/DCIM/SpyVideoCam');
-    } else {
-      dir = await getApplicationDocumentsDirectory();
-    }
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    return dir;
-  }
-
-  Future<void> _saveToGallery(String tempPath, String finalPath) async {
-    final tempFile = File(tempPath);
-    if (await tempFile.exists()) {
-      await tempFile.copy(finalPath);
-      await tempFile.delete();
-    }
-  }
-
-  String _formatTimestamp(DateTime dt) {
-    return '${dt.year}${_pad(dt.month)}${_pad(dt.day)}_'
-        '${_pad(dt.hour)}${_pad(dt.minute)}${_pad(dt.second)}';
-  }
-
-  String _pad(int n) => n.toString().padLeft(2, '0');
 
   void _setState(RecordingState s) {
     _state = s;
@@ -248,11 +186,8 @@ class RecordingService {
   }
 
   void dispose() {
-    _chunkTimer?.cancel();
-    _elapsedTimer?.cancel();
-    _maxDurationTimer?.cancel();
+    _eventSub?.cancel();
     _sessionStream.close();
     _stateStream.close();
-    _cameraController?.dispose();
   }
 }

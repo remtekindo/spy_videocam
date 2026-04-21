@@ -50,10 +50,32 @@ class SchedulerService : Service() {
             )
 
             val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMs, pending)
-            } else {
-                alarm.setExact(AlarmManager.RTC_WAKEUP, triggerAtMs, pending)
+
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                    // Android 12+: cek dulu apakah exact alarm tersedia
+                    if (alarm.canScheduleExactAlarms()) {
+                        alarm.setExactAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP, triggerAtMs, pending
+                        )
+                    } else {
+                        // Fallback: setWindow dengan toleransi 1 menit
+                        alarm.setWindow(
+                            AlarmManager.RTC_WAKEUP,
+                            triggerAtMs,
+                            60_000L,
+                            pending
+                        )
+                    }
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+                    alarm.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP, triggerAtMs, pending
+                    )
+                }
+                else -> {
+                    alarm.setExact(AlarmManager.RTC_WAKEUP, triggerAtMs, pending)
+                }
             }
 
             context.getSharedPreferences("cctv_schedule", Context.MODE_PRIVATE)
