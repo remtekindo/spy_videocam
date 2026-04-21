@@ -26,6 +26,12 @@ import java.util.*
  *   start/stop (sudah ada di MainActivity)
  *
  * Output: /storage/emulated/0/DCIM/SpyVideoCam/chunk_NNN_YYYYMMDD_HHmmss.mp4
+ *
+ * Catatan kompatibilitas:
+ * Beberapa device OPPO/OnePlus menolak TEMPLATE_RECORD via Camera2.
+ * Kode ini mencoba TEMPLATE_RECORD terlebih dahulu, lalu fallback ke
+ * TEMPLATE_PREVIEW jika gagal. Keduanya menghasilkan rekaman yang valid
+ * karena output tetap ke MediaRecorder surface.
  */
 class CameraRecorderPlugin(private val context: Context) {
 
@@ -165,20 +171,36 @@ class CameraRecorderPlugin(private val context: Context) {
             object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) {
                     captureSession = session
-                    val request = camera.createCaptureRequest(
-                        CameraDevice.TEMPLATE_RECORD
-                    ).apply {
-                        addTarget(surface)
-                    }.build()
 
-                    session.setRepeatingRequest(request, null, cameraHandler)
-                    mediaRecorder?.start()
-                    isRecording = true
+                    // Coba TEMPLATE_RECORD dulu, fallback ke TEMPLATE_PREVIEW
+                    // untuk device OPPO/OnePlus yang menolak TEMPLATE_RECORD
+                    val request = try {
+                        camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+                            .apply { addTarget(surface) }
+                            .build()
+                    } catch (e: CameraAccessException) {
+                        Log.w(TAG, "TEMPLATE_RECORD gagal (${e.message}), fallback ke TEMPLATE_PREVIEW")
+                        try {
+                            camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                                .apply { addTarget(surface) }
+                                .build()
+                        } catch (e2: CameraAccessException) {
+                            pushError("Tidak bisa membuat capture request: ${e2.message}")
+                            return
+                        }
+                    }
 
-                    if (chunkIndex == 1) {
-                        // Sesi baru dimulai
-                        startTimers()
-                        pushStatus()
+                    try {
+                        session.setRepeatingRequest(request, null, cameraHandler)
+                        mediaRecorder?.start()
+                        isRecording = true
+
+                        if (chunkIndex == 1) {
+                            startTimers()
+                            pushStatus()
+                        }
+                    } catch (e: Exception) {
+                        pushError("setRepeatingRequest error: ${e.message}")
                     }
                 }
 
@@ -193,7 +215,6 @@ class CameraRecorderPlugin(private val context: Context) {
     private fun rotateChunk() {
         if (!isRecording) return
 
-        // Stop chunk saat ini
         try {
             captureSession?.stopRepeating()
             captureSession?.close()
@@ -206,14 +227,8 @@ class CameraRecorderPlugin(private val context: Context) {
         }
 
         captureSession = null
-
-        // Push update ke Flutter
         pushStatus()
-
-        // Start chunk berikutnya
         startChunk()
-
-        // Re-schedule chunk timer
         chunkHandler.postDelayed(chunkRunnable, CHUNK_DURATION_MS)
     }
 
@@ -229,9 +244,9 @@ class CameraRecorderPlugin(private val context: Context) {
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            setVideoSize(640, 480)        // 480p — hemat baterai & storage
+            setVideoSize(640, 480)
             setVideoFrameRate(24)
-            setVideoEncodingBitRate(1_500_000)  // 1.5 Mbps
+            setVideoEncodingBitRate(1_500_000)
             setAudioEncodingBitRate(128_000)
             setAudioSamplingRate(44100)
             setOutputFile(outputPath)
