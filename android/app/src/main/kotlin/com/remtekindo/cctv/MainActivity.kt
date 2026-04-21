@@ -15,8 +15,6 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         // ─── EventChannel — push status recorder ke Flutter ───────────────
-        // Dipasang ke VideoForegroundService.eventSink agar CameraRecorderPlugin
-        // bisa mengirim status (elapsed, chunk, savedFiles) ke Dart side
         EventChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             recorderEventChannel
@@ -37,7 +35,9 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "scheduleRecording" -> {
-                    val delayMs = call.argument<Long>("delayMs") ?: 0L
+                    // Flutter bisa mengirim delayMs sebagai Int atau Long
+                    // tergantung nilai — gunakan Number untuk handle keduanya
+                    val delayMs = (call.argument<Any>("delayMs") as? Number)?.toLong() ?: 0L
                     val intent = Intent(this, SchedulerService::class.java).apply {
                         action = "SCHEDULE"
                         putExtra("delay_ms", delayMs)
